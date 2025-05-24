@@ -574,13 +574,16 @@ def index_redirect():
         })
 
 # Initialize the application
-# Download models if needed
-print("Checking for model weights...")
-prepare_models()
+# We'll load models on-demand instead of at startup
+print("Initializing application in lightweight mode...")
 
-# Load the model
-print("Loading models...")
-load_model()
+# Set global variables to None initially
+model = None
+yolo_model = None
+CLASS_NAMES = []
+
+# Flag to track if models have been loaded
+MODELS_LOADED = False
 
 if __name__ == '__main__':
     # Get port from environment variable (Heroku sets this automatically)
