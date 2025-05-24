@@ -110,24 +110,58 @@ def load_yolo():
 
 def load_model():
     global model, yolo_model, CLASS_NAMES
-    # Load class names
-    with open('classes.txt', 'r') as f:
-        CLASS_NAMES = [line.strip() for line in f.readlines()]
     
-    # Load classification model
-    num_classes = len(CLASS_NAMES)
-    model = create_model(num_classes)
+    # Load class names with error handling
+    try:
+        if os.path.exists('classes.txt'):
+            with open('classes.txt', 'r') as f:
+                CLASS_NAMES = [line.strip() for line in f.readlines()]
+            print(f"Loaded {len(CLASS_NAMES)} classes from classes.txt")
+        else:
+            # Default classes if file not found
+            print("Warning: classes.txt not found. Using default classes.")
+            CLASS_NAMES = [
+                'Bus-stop', 'Compulsory-Roundabout', 'Cross-Roads-Ahead',
+                'Double-Bend-to-Left-Ahead', 'Double-Bend-to-Right-Ahead',
+                'Falling-Rocks-Ahead', 'Left-Bend-Ahead', 'Level-crossing-with-barriers-ahead',
+                'Level-crossing-without-barriers-ahead', 'Narrow-Bridge-or-Culvert-Ahead',
+                'No-entry', 'No-overtaking', 'No-parking', 'Pedestrian-crossing-ahead',
+                'Right-Bend-Ahead', 'Road-narrows-on-both-sides-ahead', 'School-ahead',
+                'Slippery-Road-Ahead', 'Speed-limit-20', 'Speed-limit-30', 'Speed-limit-50',
+                'Stop', 'T-Junction-Ahead', 'Traffic-signals-ahead'
+            ]
+    except Exception as e:
+        print(f"Error loading classes: {e}")
+        CLASS_NAMES = ['Unknown']
     
-    if os.path.exists(MODEL_PATH):
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-        model.to(DEVICE)
-        model.eval()
-        print(f"Classification model loaded from {MODEL_PATH}")
-    else:
-        print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
+    # Create classification model
+    try:
+        num_classes = len(CLASS_NAMES)
+        model = create_model(num_classes)
+        
+        if os.path.exists(MODEL_PATH):
+            try:
+                model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+                model.to(DEVICE)
+                model.eval()
+                print(f"Classification model loaded from {MODEL_PATH}")
+            except Exception as e:
+                print(f"Error loading model weights: {e}")
+                print("Using untrained model as fallback")
+        else:
+            print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
+    except Exception as e:
+        print(f"Error creating classification model: {e}")
+        model = None
     
     # Load YOLOv5 detection model
-    yolo_model = load_yolo()
+    try:
+        yolo_model = load_yolo()
+        if yolo_model is None:
+            print("Warning: YOLOv5 model could not be loaded. Detection will be limited.")
+    except Exception as e:
+        print(f"Error loading YOLOv5 model: {e}")
+        yolo_model = None
     
     return model
 
@@ -517,16 +551,8 @@ def predict_webcam():
                 'has_prediction': False
             })
 
-# Simple route for Flutter health check
+# Health check endpoints
 @app.route('/api/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        'status': 'ok',
-        'model_loaded': model is not None,
-        'classes': len(CLASS_NAMES)
-    })
-
-# Health check endpoint for Heroku
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
@@ -547,15 +573,16 @@ def index_redirect():
             'error': str(e)
         })
 
+# Initialize the application
+# Download models if needed
+print("Checking for model weights...")
+prepare_models()
+
+# Load the model
+print("Loading models...")
+load_model()
+
 if __name__ == '__main__':
-    # Download models if needed
-    print("Checking for model weights...")
-    prepare_models()
-    
-    # Load the model
-    print("Loading models...")
-    load_model()
-    
     # Get port from environment variable (Heroku sets this automatically)
     port = int(os.environ.get('PORT', 5000))
     
