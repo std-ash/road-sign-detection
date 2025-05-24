@@ -56,46 +56,56 @@ def create_model(num_classes):
 
 def load_yolo():
     """Load YOLOv5 model for object detection, prioritizing traffic sign detection"""
-    global yolo_model
     try:
-        # First try to load a specialized traffic sign detection model if available
+        import os
+        import sys
+        import torch
+        
+        # Force PyTorch to use CPU only to save memory
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        
         if os.path.exists(CUSTOM_YOLO_PATH):
-            print(f"Loading specialized traffic sign detection model from {CUSTOM_YOLO_PATH}")
-            # Custom model loading
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'custom', path=CUSTOM_YOLO_PATH)
-            yolo_model.to(DEVICE)
-            yolo_model.eval()
-            print("Specialized traffic sign detection model loaded successfully")
-            return yolo_model
+            # Try to load specialized traffic sign detection model first
+            print("Loading specialized YOLOv5 traffic sign detection model...")
+            # Use local import of YOLOv5 with minimum dependencies
+            yolo_model = torch.hub.load('ultralytics/yolov5', 'custom', 
+                                       path=CUSTOM_YOLO_PATH, 
+                                       force_reload=False,
+                                       skip_validation=True)  # Skip validation to save memory
+        else:
+            # Fall back to pretrained YOLOv5 small model (not medium) to save memory
+            print("Loading lightweight YOLOv5s model...")
+            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', 
+                                       force_reload=False,
+                                       skip_validation=True)  # Skip validation to save memory
+            
+        # Configure YOLOv5 for small object detection while minimizing memory usage
+        yolo_model.conf = DETECTION_THRESHOLD  # Detection confidence threshold
+        yolo_model.iou = 0.45  # NMS IoU threshold
+        yolo_model.agnostic = False  # NMS class-agnostic
+        yolo_model.multi_label = False  # NMS multiple labels per box
+        yolo_model.max_det = 10  # Maximum number of detections per image
         
-        # If no specialized model, try to load YOLOv5m (medium) for better accuracy than small
-        print("No specialized model found, loading YOLOv5m...")
-        yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5m', pretrained=True)
-        
-        # Configure model for better small object detection (road signs are often small in images)
-        yolo_model.conf = 0.25  # Lower confidence threshold for detection
-        yolo_model.iou = 0.45   # IOU threshold for NMS
-        yolo_model.classes = None  # Detect all classes
-        yolo_model.max_det = 100  # Increase maximum detections
-        
-        yolo_model.to(DEVICE)
-        yolo_model.eval()
-        print("YOLOv5m model loaded and optimized for small object detection")
+        # Clear cache to save memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         return yolo_model
     except Exception as e:
         print(f"Error loading YOLOv5 model: {e}")
+        # Try to load the smallest YOLOv5 model as a last resort
         try:
-            # Fallback to smaller model which might be more compatible
             print("Falling back to YOLOv5s...")
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', 
+                                        pretrained=True, 
+                                        force_reload=False, 
+                                        skip_validation=True)
             yolo_model.conf = 0.25  # Lower confidence threshold
-            yolo_model.to(DEVICE)
-            yolo_model.eval()
             print("YOLOv5s model loaded successfully as fallback")
             return yolo_model
         except Exception as e2:
             print(f"Error loading fallback YOLOv5 model: {e2}")
-            print("Using YOLOv5 API fallback for detection")
+            print("No YOLOv5 model available for detection")
             return None
 
 def load_model():

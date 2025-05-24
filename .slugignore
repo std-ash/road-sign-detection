@@ -1,0 +1,23 @@
+# Ignore these files/directories when creating the Heroku slug
+*.git
+*.pyc
+__pycache__/
+.vscode/
+.idea/
+tests/
+*.egg-info/
+.pytest_cache/
+.coverage
+*.log
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# YOLOv5 related files we don't need
+yolov5/data/
+yolov5/runs/
+yolov5/.github/
+yolov5/utils/loggers/
+yolov5/models/*.yaml
