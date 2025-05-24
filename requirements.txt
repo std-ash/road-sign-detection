@@ -1,21 +1,15 @@
-# Core dependencies - CPU versions only to reduce size
+# Core dependencies - minimal set for Heroku
 numpy==1.22.4
-opencv-python-headless==4.5.5.64
 pillow==9.1.1
 
-# PyTorch CPU-only versions (much smaller than GPU versions)
-torch==1.11.0+cpu
-torchvision==0.12.0+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# Web server - minimal versions
+# Web server with fixed versions to avoid compatibility issues
 flask==2.0.1
+werkzeug==2.0.2
 flask-cors==3.0.10
 gunicorn==20.1.0
+jinja2==3.0.3
+itsdangerous==2.0.1
+click==8.0.3
 
 # Utilities - only what's needed
 requests==2.27.1
-tqdm==4.64.0
-
-# Minimum required for YOLOv5 functionality
-scipy==1.7.3  # Smaller version than latest

@@ -1,11 +1,8 @@
 import os
-import io
-import base64
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-from PIL import Image
 
-app = Flask(__name__, static_url_path='/static', static_folder='static')
+app = Flask(__name__)
 CORS(app)  # Enable CORS for Flutter integration
 
 # Basic class names for demonstration
@@ -23,25 +20,18 @@ CLASS_NAMES = [
 # Home page
 @app.route('/')
 def index():
-    try:
-        return render_template('index.html')
-    except Exception as e:
-        return jsonify({
-            'status': 'ok',
-            'info': 'Road Sign Detection API is running. Use /api/predict or /realtime endpoints.',
-            'error': str(e)
-        })
+    return jsonify({
+        'status': 'ok',
+        'info': 'Road Sign Detection API is running. Use /api/predict or /api/health endpoints.'
+    })
 
 # Realtime page
 @app.route('/realtime')
 def realtime():
-    try:
-        return render_template('realtime.html')
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        })
+    return jsonify({
+        'status': 'ok',
+        'info': 'Realtime endpoint is available in the full version.'
+    })
 
 # Health check endpoint
 @app.route('/health', methods=['GET'])
@@ -57,88 +47,43 @@ def health_check():
 @app.route('/api/predict', methods=['POST'])
 @app.route('/predict', methods=['POST'])
 def predict():
-    if request.method == 'POST':
-        try:
-            # Check if an image was uploaded
-            if 'image' not in request.files:
-                return jsonify({
-                    'success': False,
-                    'error': 'No image uploaded',
-                    'predictions': [],
-                    'has_prediction': False
-                })
-            
-            # Get the image from the request
-            file = request.files['image']
-            img = Image.open(file.stream)
-            
-            # Return a placeholder response
-            return jsonify({
-                'success': True,
-                'message': 'This is a lightweight placeholder. ML models are not loaded in this version.',
-                'predictions': [
-                    {
-                        'class': 'Placeholder Detection',
-                        'confidence': 0.99,
-                        'bbox': [10, 10, 100, 100]
-                    }
-                ],
-                'has_prediction': True,
-                'top_prediction': {
-                    'class': 'Placeholder Detection',
-                    'confidence': 0.99
-                }
-            })
-            
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e),
-                'predictions': [],
-                'has_prediction': False
-            })
+    return jsonify({
+        'success': True,
+        'message': 'This is a lightweight placeholder. ML models are not loaded in this version.',
+        'predictions': [
+            {
+                'class': 'Placeholder Detection',
+                'confidence': 0.99,
+                'bbox': [10, 10, 100, 100]
+            }
+        ],
+        'has_prediction': True,
+        'top_prediction': {
+            'class': 'Placeholder Detection',
+            'confidence': 0.99
+        }
+    })
 
 # Placeholder webcam endpoint
 @app.route('/api/predict_webcam', methods=['POST'])
 @app.route('/predict_webcam', methods=['POST'])
 def predict_webcam():
-    if request.method == 'POST':
-        try:
-            # Get the base64 encoded image from the request
-            data = request.get_json()
-            if not data or 'image' not in data:
-                return jsonify({
-                    'success': False,
-                    'error': 'No image data received',
-                    'predictions': [],
-                    'has_prediction': False
-                })
-            
-            # Return a placeholder response
-            return jsonify({
-                'success': True,
-                'message': 'This is a lightweight placeholder. ML models are not loaded in this version.',
-                'predictions': [
-                    {
-                        'class': 'Placeholder Detection',
-                        'confidence': 0.99,
-                        'bbox': [10, 10, 100, 100]
-                    }
-                ],
-                'has_prediction': True,
-                'top_prediction': {
-                    'class': 'Placeholder Detection',
-                    'confidence': 0.99
-                }
-            })
-            
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e),
-                'predictions': [],
-                'has_prediction': False
-            })
+    return jsonify({
+        'success': True,
+        'message': 'This is a lightweight placeholder. ML models are not loaded in this version.',
+        'predictions': [
+            {
+                'class': 'Placeholder Detection',
+                'confidence': 0.99,
+                'bbox': [10, 10, 100, 100]
+            }
+        ],
+        'has_prediction': True,
+        'top_prediction': {
+            'class': 'Placeholder Detection',
+            'confidence': 0.99
+        }
+    })
 
 if __name__ == '__main__':
     # Get port from environment variable (Heroku sets this automatically)
