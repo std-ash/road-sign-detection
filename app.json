@@ -1,0 +1,17 @@
+{
+  "name": "Road Sign Detection API",
+  "description": "An API for detecting and classifying road signs in images using machine learning",
+  "repository": "https://github.com/yourusername/road-sign-detection",
+  "keywords": ["python", "flask", "machine-learning", "computer-vision", "road-signs"],
+  "env": {
+    "DISABLE_TORCH_IMPORT": {
+      "description": "Set to 1 to disable PyTorch import during slug compilation (only used during build)",
+      "value": "0"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
