@@ -167,16 +167,7 @@ def process_image(img):
             'has_prediction': False
         }
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/realtime')
-def realtime():
-    return render_template('realtime.html')
-
 @app.route('/api/predict', methods=['POST'])
-@app.route('/predict', methods=['POST'])  # Keep old route for backward compatibility
 def predict():
     if request.method == 'POST':
         # Check if image was uploaded
@@ -215,7 +206,6 @@ def predict():
             })
 
 @app.route('/api/predict_webcam', methods=['POST'])
-@app.route('/predict_webcam', methods=['POST'])  # Keep old route for backward compatibility
 def predict_webcam():
     if request.method == 'POST':
         try:
