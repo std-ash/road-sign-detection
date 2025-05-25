@@ -1,40 +1,71 @@
 import os
 import io
+import sys
 import base64
-import torch
-import torch.nn as nn
-import numpy as np
-import cv2
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Basic dependencies that should always work
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-from PIL import Image
-from torchvision import transforms, models
-import requests
-import time
+
+# Import dependencies that might fail and handle gracefully
+try:
+    import numpy as np
+    import torch
+    import torch.nn as nn
+    from PIL import Image
+    from torchvision import transforms, models
+    import cv2
+    DEPS_LOADED = True
+    logger.info("All ML dependencies loaded successfully")
+except Exception as e:
+    DEPS_LOADED = False
+    logger.error(f"Error loading ML dependencies: {e}")
+
+# Import optional dependencies
+try:
+    import requests
+    import time
+except Exception as e:
+    logger.warning(f"Optional dependencies not loaded: {e}")
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 CORS(app)  # Enable CORS for Flutter integration
 
-# Load the trained model
-MODEL_PATH = os.path.join('weights', 'best.pt')
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# Initialize global variables
 model = None
 yolo_model = None
 CLASS_NAMES = []
+DEPS_LOADED_SUCCESSFULLY = False
 
-# Image preprocessing transformer
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
-# Confidence thresholds
-CLASSIFICATION_THRESHOLD = 0.75  # 75% for classification confidence
-DETECTION_THRESHOLD = 0.4  # 40% for detection confidence
-
-# YOLOv5 detection classes that could be road signs
-ROAD_SIGN_CLASSES = ['traffic light', 'stop sign', 'parking meter', 'fire hydrant']
+# Image preprocessing transformer (only define if dependencies loaded)
+if DEPS_LOADED:
+    # Load the trained model
+    MODEL_PATH = os.path.join('weights', 'best.pt')
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Image preprocessing transformer
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # Confidence thresholds
+    CLASSIFICATION_THRESHOLD = 0.75  # 75% for classification confidence
+    DETECTION_THRESHOLD = 0.4  # 40% for detection confidence
+    
+    # YOLOv5 detection classes that could be road signs
+    ROAD_SIGN_CLASSES = ['traffic light', 'stop sign', 'parking meter', 'fire hydrant']
+else:
+    logger.warning("ML dependencies not loaded. App will run in limited mode.")
 
 def create_model(num_classes):
     """Create a MobileNetV3 model for classification"""
@@ -49,8 +80,13 @@ def create_model(num_classes):
 def load_yolo():
     """Load YOLOv5 model for object detection"""
     global yolo_model
+    if not DEPS_LOADED:
+        logger.error("Cannot load YOLOv5 - dependencies not available")
+        return None
+        
     try:
         # Load YOLOv5n (nano) - the smallest and fastest model
+        logger.info("Loading YOLOv5n model...")
         yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5n', pretrained=True, force_reload=False)
         # Optimize for CPU inference
         yolo_model.to(DEVICE)
@@ -58,36 +94,70 @@ def load_yolo():
         # Set lower inference size to reduce memory usage
         yolo_model.conf = 0.45  # Higher confidence threshold
         yolo_model.iou = 0.45   # Higher IoU threshold
-        print("YOLOv5n model loaded successfully")
+        logger.info("YOLOv5n model loaded successfully")
         return yolo_model
     except Exception as e:
-        print(f"Error loading YOLOv5 model: {e}")
-        # Simplified fallback - don't attempt API calls to save space
-        print("YOLOv5 model failed to load - will use direct classification only")
+        logger.error(f"Error loading YOLOv5 model: {e}")
         return None
 
 def load_model():
-    global model, yolo_model, CLASS_NAMES
-    # Load class names
-    with open('classes.txt', 'r') as f:
-        CLASS_NAMES = [line.strip() for line in f.readlines()]
+    """Load models with proper error handling"""
+    global model, yolo_model, CLASS_NAMES, DEPS_LOADED_SUCCESSFULLY
     
-    # Load classification model
-    num_classes = len(CLASS_NAMES)
-    model = create_model(num_classes)
+    if not DEPS_LOADED:
+        logger.error("Cannot load models - dependencies not available")
+        return None
     
-    if os.path.exists(MODEL_PATH):
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-        model.to(DEVICE)
-        model.eval()
-        print(f"Classification model loaded from {MODEL_PATH}")
-    else:
-        print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
-    
-    # Load YOLOv5 detection model
-    yolo_model = load_yolo()
-    
-    return model
+    try:
+        # Load class names
+        try:
+            with open('classes.txt', 'r') as f:
+                CLASS_NAMES = [line.strip() for line in f.readlines()]
+            logger.info(f"Loaded {len(CLASS_NAMES)} class names")
+        except Exception as e:
+            logger.error(f"Error loading class names: {e}")
+            # Create some dummy class names to prevent crashes
+            CLASS_NAMES = [f"Class_{i}" for i in range(10)]
+        
+        # Load classification model
+        try:
+            num_classes = len(CLASS_NAMES)
+            logger.info(f"Creating model for {num_classes} classes...")
+            model = create_model(num_classes)
+            
+            if os.path.exists(MODEL_PATH):
+                logger.info(f"Loading model weights from {MODEL_PATH}...")
+                model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+                model.to(DEVICE)
+                model.eval()
+                logger.info("Classification model loaded successfully")
+            else:
+                logger.warning(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
+        except Exception as e:
+            logger.error(f"Error loading classification model: {e}")
+            model = None
+        
+        # Try to load YOLOv5 model but don't let it crash the app
+        try:
+            # Load YOLOv5 detection model with a timeout
+            logger.info("Attempting to load YOLOv5 model...")
+            yolo_model = load_yolo()
+        except Exception as e:
+            logger.error(f"Error in YOLOv5 loading process: {e}")
+            yolo_model = None
+        
+        # Mark as successful if at least one model loaded
+        if model is not None or yolo_model is not None:
+            DEPS_LOADED_SUCCESSFULLY = True
+            logger.info("At least one model loaded successfully")
+            return model
+        else:
+            logger.error("Failed to load any models")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in model loading: {e}")
+        return None
 
 def detect_road_signs(img):
     """Detect potential road signs in the image using YOLOv5"""
@@ -270,49 +340,134 @@ def index():
 def realtime():
     return render_template('realtime.html')
 
+@app.route('/status')
+def status():
+    """Provide app status information without relying on ML models"""
+    status_info = {
+        'app_running': True,
+        'dependencies_loaded': DEPS_LOADED,
+        'models_loaded': DEPS_LOADED_SUCCESSFULLY,
+        'classification_model': model is not None,
+        'detection_model': yolo_model is not None,
+        'num_classes': len(CLASS_NAMES) if CLASS_NAMES else 0,
+        'server_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'python_version': sys.version,
+    }
+    return jsonify(status_info)
+
 @app.route('/api/predict', methods=['POST'])
 @app.route('/predict', methods=['POST'])  # Keep old route for backward compatibility
 def predict():
     if request.method == 'POST':
-        # Check if image was uploaded
-        if 'image' not in request.files:
+        # Check if ML dependencies and models are loaded
+        if not DEPS_LOADED:
+            logger.error("ML dependencies not loaded, cannot make predictions")
             return jsonify({
-                'success': False, 
-                'error': 'No image uploaded',
-                'predictions': [],
-                'has_prediction': False
+                'success': False,
+                'error': 'ML dependencies not available',
+                'status': 'limited_mode'
             })
         
-        file = request.files['image']
-        if file.filename == '':
+        if not DEPS_LOADED_SUCCESSFULLY:
+            logger.error("Models failed to load, cannot make predictions")
             return jsonify({
-                'success': False, 
-                'error': 'No image selected',
-                'predictions': [],
-                'has_prediction': False
+                'success': False,
+                'error': 'Models failed to load properly',
+                'status': 'model_error'
             })
         
         try:
-            # Read image
-            img_bytes = file.read()
-            img = Image.open(io.BytesIO(img_bytes))
+            # Get image from request
+            if 'file' not in request.files:
+                logger.warning("No file found in request")
+                return jsonify({
+                    'success': False,
+                    'error': 'No file found'
+                })
+                
+            file = request.files['file']
+            if file.filename == '':
+                logger.warning("Empty filename received")
+                return jsonify({
+                    'success': False,
+                    'error': 'No file selected'
+                })
+                
+            # Read and process the image
+            try:
+                img_bytes = file.read()
+                img = Image.open(io.BytesIO(img_bytes))
+                img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                logger.info(f"Image processed successfully: {img.size}")
+            except Exception as img_error:
+                logger.error(f"Error processing image: {img_error}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Error processing image: {str(img_error)}'
+                })
             
-            # Get predictions
-            result = process_image(img)
-            return jsonify(result)
+            # Process the image using YOLO detection followed by classification
+            try:
+                predictions = process_image(img_cv)
+                logger.info(f"Processed image with {len(predictions) if predictions else 0} predictions")
+            except Exception as pred_error:
+                logger.error(f"Error during prediction: {pred_error}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Error during prediction: {str(pred_error)}'
+                })
             
+            # Return predictions in the desired format
+            if predictions and len(predictions) > 0:
+                # Sort by confidence (descending)
+                predictions.sort(key=lambda x: x['confidence'], reverse=True)
+                # Find predictions with confidence above threshold
+                valid_predictions = [p for p in predictions if p['confidence'] >= CLASSIFICATION_THRESHOLD]
+                
+                response = {
+                    'success': True,
+                    'predictions': predictions,
+                    'has_prediction': len(valid_predictions) > 0,
+                    'top_prediction': valid_predictions[0] if valid_predictions else None,
+                }
+            else:
+                response = {
+                    'success': True,
+                    'predictions': [],
+                    'has_prediction': False,
+                    'top_prediction': None,
+                }
+            
+            logger.info(f"Returning prediction response with success={response['success']}")
+            return jsonify(response)
         except Exception as e:
+            logger.error(f"Unexpected error in prediction endpoint: {e}")
             return jsonify({
-                'success': False, 
-                'error': str(e),
-                'predictions': [],
-                'has_prediction': False
+                'success': False,
+                'error': str(e)
             })
 
 @app.route('/api/predict_webcam', methods=['POST'])
 @app.route('/predict_webcam', methods=['POST'])  # Keep old route for backward compatibility
 def predict_webcam():
     if request.method == 'POST':
+        # Check if ML dependencies and models are loaded
+        if not DEPS_LOADED:
+            logger.error("ML dependencies not loaded, cannot make predictions")
+            return jsonify({
+                'success': False,
+                'error': 'ML dependencies not available',
+                'status': 'limited_mode'
+            })
+        
+        if not DEPS_LOADED_SUCCESSFULLY:
+            logger.error("Models failed to load, cannot make predictions")
+            return jsonify({
+                'success': False,
+                'error': 'Models failed to load properly',
+                'status': 'model_error'
+            })
+        
         try:
             # Get the base64 encoded image from the request
             data = request.get_json()
@@ -350,8 +505,34 @@ def health_check():
         'classes': len(CLASS_NAMES)
     })
 
+# Fix the mismatch in file parameter names
+@app.before_request
+def fix_image_param():
+    if request.method == 'POST' and request.path in ['/predict', '/api/predict']:
+        if 'image' in request.files and 'file' not in request.files:
+            # Copy 'image' param to 'file' param for compatibility
+            request.files = dict(request.files)
+            request.files['file'] = request.files['image']
+
+# Initialize the app with models if possible
+def initialize_app():
+    """Initialize the application with careful error handling"""
+    try:
+        if DEPS_LOADED:
+            logger.info("Attempting to load models...")
+            load_model()
+        else:
+            logger.warning("Skipping model loading due to missing dependencies")
+    except Exception as e:
+        logger.error(f"Error during app initialization: {e}")
+    
+    logger.info("Application initialized and ready to serve requests")
+
+# Initialize on startup
+initialize_app()
+
 if __name__ == '__main__':
-    load_model()
-    # Get port from environment variable (Heroku sets this automatically)
+    # Use the PORT environment variable if available (for Heroku deployment)
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    logger.info(f"Starting Flask app on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
