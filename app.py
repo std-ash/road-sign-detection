@@ -39,27 +39,72 @@ def create_model(num_classes):
 
 def load_model():
     global model, CLASS_NAMES
-    # Load class names
-    with open('classes.txt', 'r') as f:
-        CLASS_NAMES = [line.strip() for line in f.readlines()]
-    
-    # Load model
-    num_classes = len(CLASS_NAMES)
-    model = create_model(num_classes)
-    
-    if os.path.exists(MODEL_PATH):
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-        model.to(DEVICE)
-        model.eval()
-        print(f"Model loaded from {MODEL_PATH}")
-    else:
-        print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
-    
-    return model
+    try:
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Listing files in current directory: {os.listdir('.')}")
+        
+        # Load class names
+        class_path = 'classes.txt'
+        if os.path.exists(class_path):
+            print(f"Found classes file at {class_path}")
+            with open(class_path, 'r') as f:
+                CLASS_NAMES = [line.strip() for line in f.readlines()]
+            print(f"Loaded {len(CLASS_NAMES)} classes")
+        else:
+            print(f"Warning: Classes file not found at {class_path}")
+            # Fallback to default classes
+            CLASS_NAMES = [f"Class_{i}" for i in range(37)]
+            print(f"Using {len(CLASS_NAMES)} fallback classes")
+        
+        # Check if weights directory exists
+        if os.path.exists('weights'):
+            print(f"Weights directory exists. Contents: {os.listdir('weights')}")
+        else:
+            print(f"Weights directory does not exist")
+        
+        # Load model
+        num_classes = len(CLASS_NAMES)
+        model = create_model(num_classes)
+        
+        if os.path.exists(MODEL_PATH):
+            print(f"Loading model from {MODEL_PATH}")
+            model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+            model.to(DEVICE)
+            model.eval()
+            print(f"Model loaded successfully from {MODEL_PATH}")
+        else:
+            print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
+            # Initialize the model with random weights
+            model.eval()
+            print("Initialized model with random weights")
+        
+        return model
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+        # Still return a model even if there's an error
+        if 'model' not in locals() or model is None:
+            num_classes = len(CLASS_NAMES) if CLASS_NAMES else 37
+            model = create_model(num_classes)
+            model.eval()
+            print("Created fallback model due to error")
+        return model
 
 def process_image(img):
     """Process an image and return predictions only if confidence exceeds threshold"""
     try:
+        # Check if model is loaded
+        global model
+        if model is None:
+            print("Warning: Model not loaded, attempting to load it")
+            load_model()
+            if model is None:
+                return {
+                    'success': False,
+                    'error': 'Model not loaded',
+                    'predictions': [],
+                    'has_prediction': False
+                }
+        
         # Ensure the image is in RGB format
         if img.mode != 'RGB':
             img = img.convert('RGB')
@@ -72,39 +117,55 @@ def process_image(img):
         
         # Make prediction
         with torch.no_grad():
-            outputs = model(img_tensor)
-            probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
-            
-            # Get top 3 predictions
-            top_probs, top_indices = torch.topk(probabilities, 3)
-            
-            predictions = []
-            for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
-                confidence = prob.item()
-                class_id = idx.item()
+            try:
+                outputs = model(img_tensor)
+                probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
                 
-                # Only include predictions with confidence above threshold
-                if confidence >= CONFIDENCE_THRESHOLD or i == 0:  # Always include top prediction
-                    predictions.append({
-                        'class_id': class_id,
-                        'class_name': CLASS_NAMES[class_id] if class_id < len(CLASS_NAMES) else 'Unknown',
-                        'confidence': confidence
-                    })
-            
-            # Sort by confidence
-            predictions.sort(key=lambda x: x['confidence'], reverse=True)
-            
-            # Filter out predictions below threshold
-            filtered_predictions = [p for p in predictions if p['confidence'] >= CONFIDENCE_THRESHOLD]
-            
-            return {
-                'success': True,
-                'predictions': filtered_predictions,
-                'has_prediction': len(filtered_predictions) > 0,
-                'top_prediction': predictions[0] if predictions else None
-            }
+                # Get top 3 predictions or fewer if there aren't enough classes
+                k = min(3, len(CLASS_NAMES))
+                top_probs, top_indices = torch.topk(probabilities, k)
+                
+                predictions = []
+                for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
+                    confidence = prob.item()
+                    class_id = idx.item()
+                    
+                    # Only include predictions with confidence above threshold
+                    if confidence >= CONFIDENCE_THRESHOLD or i == 0:  # Always include top prediction
+                        predictions.append({
+                            'class_id': class_id,
+                            'class_name': CLASS_NAMES[class_id] if class_id < len(CLASS_NAMES) else 'Unknown',
+                            'confidence': confidence
+                        })
+                
+                # Sort by confidence
+                predictions.sort(key=lambda x: x['confidence'], reverse=True)
+                
+                # Filter out predictions below threshold
+                filtered_predictions = [p for p in predictions if p['confidence'] >= CONFIDENCE_THRESHOLD]
+                
+                return {
+                    'success': True,
+                    'predictions': filtered_predictions,
+                    'has_prediction': len(filtered_predictions) > 0,
+                    'top_prediction': predictions[0] if predictions else None
+                }
+            except Exception as e:
+                print(f"Error during model prediction: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f"Model prediction error: {str(e)}",
+                    'predictions': [],
+                    'has_prediction': False
+                }
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+        print(f"Error in process_image: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'predictions': [],
+            'has_prediction': False
+        }
 
 @app.route('/')
 def index():
@@ -194,8 +255,21 @@ def health_check():
         'classes': len(CLASS_NAMES)
     })
 
+# Initialize model at startup (but not during module import)
+model = None
+CLASS_NAMES = []
+
+# This will ensure the model is loaded when the app starts, not just in __main__
+@app.before_first_request
+def initialize():
+    global model
+    if model is None:
+        print("Loading model before first request")
+        load_model()
+
 if __name__ == '__main__':
-    load_model()
     # Get port from environment variable (Heroku sets this) or use 5000 as default
     port = int(os.environ.get('PORT', 5000))
+    # In development, load the model at startup
+    load_model()
     app.run(debug=False, host='0.0.0.0', port=port)
