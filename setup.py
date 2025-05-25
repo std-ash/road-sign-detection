@@ -9,16 +9,18 @@ setup(
         "flask",
         "flask-cors",
         "gunicorn",
-        "torch",
-        "torchvision",
+        # CPU-only PyTorch to reduce size
+        "torch==1.9.0+cpu",
+        "torchvision==0.10.0+cpu",
         "pillow",
         "numpy",
-        "opencv-python",
+        "opencv-python-headless",  # Headless version to reduce size
         "requests",
+        # Minimal dependencies for YOLOv5
         "pandas",
-        "matplotlib",
-        "seaborn",
-        "scipy",
         "tqdm"
+    ],
+    dependency_links=[
+        "https://download.pytorch.org/whl/torch_stable.html"
     ],
 )

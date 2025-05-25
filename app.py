@@ -50,16 +50,20 @@ def load_yolo():
     """Load YOLOv5 model for object detection"""
     global yolo_model
     try:
-        # Load YOLOv5 from torch hub
-        yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+        # Load YOLOv5n (nano) - the smallest and fastest model
+        yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5n', pretrained=True, force_reload=False)
+        # Optimize for CPU inference
         yolo_model.to(DEVICE)
         yolo_model.eval()
-        print("YOLOv5 model loaded successfully")
+        # Set lower inference size to reduce memory usage
+        yolo_model.conf = 0.45  # Higher confidence threshold
+        yolo_model.iou = 0.45   # Higher IoU threshold
+        print("YOLOv5n model loaded successfully")
         return yolo_model
     except Exception as e:
         print(f"Error loading YOLOv5 model: {e}")
-        # Fallback to using YOLOv5 API if torch hub fails
-        print("Using YOLOv5 API fallback for detection")
+        # Simplified fallback - don't attempt API calls to save space
+        print("YOLOv5 model failed to load - will use direct classification only")
         return None
 
 def load_model():
