@@ -1,63 +1,66 @@
 # Road Sign Detection API
 
-A real-time road sign detection system with two-stage detection: YOLOv5 for locating signs and MobileNetV3 for classification.
+A real-time road sign detection API built with Flask and PyTorch, ready for Flutter mobile integration.
 
 ## Features
 
-- Two-stage detection approach:
-  - YOLOv5 for detecting road signs from a distance
-  - MobileNetV3 for accurately classifying the detected signs
-- Real-time webcam detection via browser
-- REST API for mobile integration (Flutter)
-- 75% confidence threshold for reliable predictions
-
-## Live Demo
-
-[Access the demo here](#) (Update this link after Heroku deployment)
+- Real-time road sign detection using a trained MobileNetV3 model
+- REST API with 75% confidence threshold for reliable predictions
+- Web interface for testing with image upload and webcam
+- Mobile-ready endpoints for Flutter integration
 
 ## API Endpoints
 
-### Health Check
-```
-GET /api/health
-```
+- `GET /api/health` - Check API status
+- `POST /api/predict` - Upload an image for detection
+- `POST /api/predict_webcam` - Send base64-encoded image for detection
 
-### Image Upload Detection
-```
-POST /api/predict
-```
+## Flutter Integration
 
-### Real-time Webcam Detection
-```
-POST /api/predict_webcam
-```
+Example code for Flutter integration:
 
-## Local Development
+```dart
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
-1. Clone this repository
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-3. Run the application:
-```bash
-python app.py
+Future<void> detectRoadSign() async {
+  final picker = ImagePicker();
+  final image = await picker.pickImage(source: ImageSource.camera);
+  
+  if (image == null) return;
+  
+  var request = http.MultipartRequest('POST', Uri.parse('https://your-api-url.herokuapp.com/api/predict'));
+  request.files.add(await http.MultipartFile.fromPath('image', image.path));
+  
+  var response = await request.send();
+  if (response.statusCode == 200) {
+    var responseData = await response.stream.bytesToString();
+    // Parse JSON and handle the prediction result
+    print(responseData);
+  }
+}
 ```
 
 ## Deployment
 
-This application is ready for deployment on Heroku:
+### Local Development
 
-1. Create a new Heroku app
-2. Connect your GitHub repository
-3. Enable the Heroku Buildpacks:
-   - `heroku/python`
-   - `https://github.com/heroku/heroku-buildpack-apt`
-4. Deploy the application
+1. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-## Flutter Integration
+2. Run the app:
+   ```
+   python app.py
+   ```
 
-Check the API response format for integration with mobile applications:
+### Heroku Deployment
+
+[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
+
+## Response Format
 
 ```json
 {
@@ -66,19 +69,15 @@ Check the API response format for integration with mobile applications:
     {
       "class_id": 5,
       "class_name": "Stop Sign",
-      "confidence": 0.97,
-      "bbox": [100, 200, 300, 400]
+      "confidence": 0.92
     }
   ],
   "has_prediction": true,
   "top_prediction": {
     "class_id": 5,
     "class_name": "Stop Sign",
-    "confidence": 0.97,
-    "bbox": [100, 200, 300, 400]
-  },
-  "detection_mode": "two-stage",
-  "num_detections": 1
+    "confidence": 0.92
+  }
 }
 ```
 

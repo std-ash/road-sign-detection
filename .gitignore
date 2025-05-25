@@ -25,26 +25,16 @@ venv/
 ENV/
 .env
 
-# PyTorch 
-*.pt
-*.pth
-!weights/best.pt
-
-# IDE specific files
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Logs
-*.log
+# OS specific
+.DS_Store
+Thumbs.db
 
-# Local development settings
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Heroku
-.heroku/
-*.sqlite3
+# Project specific
+training.log
+*.pth.tar
