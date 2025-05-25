@@ -1,103 +1,157 @@
 import os
 import io
 import base64
-import torch
-import torch.nn as nn
-from flask import Flask, request, jsonify, render_template
+import numpy as np
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
-from torchvision import transforms, models
+import cv2
 
-app = Flask(__name__, static_url_path='/static', static_folder='static')
+# Use TFLite runtime instead of full TensorFlow
+# We'll need a dummy interpreter class for both missing model files and missing TF/TFLite
+class DummyInterpreter:
+    def __init__(self, model_path=None):
+        self.model_path = model_path
+        print(f"Dummy interpreter created with model path: {model_path}")
+        
+    def allocate_tensors(self):
+        print("Dummy allocate_tensors called")
+        
+    def get_input_details(self):
+        return [{'shape': [1, 224, 224, 3], 'index': 0}]
+        
+    def get_output_details(self):
+        return [{'shape': [1, 37], 'index': 0}]
+        
+    def set_tensor(self, index, tensor):
+        print(f"Dummy set_tensor called with index {index}")
+        
+    def invoke(self):
+        print("Dummy invoke called")
+        
+    def get_tensor(self, index):
+        print(f"Dummy get_tensor called with index {index}")
+        # Return random predictions for testing
+        return np.random.random((1, 37))
+
+# Try to import the TFLite interpreter
+try:
+    # Import TFLite interpreter from tflite_runtime package
+    from tflite_runtime.interpreter import Interpreter
+    print("TFLite runtime imported successfully")
+    HAS_TFLITE = True
+except ImportError:
+    # Fall back to TensorFlow if tflite_runtime is not available
+    try:
+        from tensorflow.lite.python.interpreter import Interpreter
+        print("TensorFlow Lite imported from full TensorFlow package")
+        HAS_TFLITE = True
+    except ImportError:
+        print("WARNING: Neither TFLite runtime nor TensorFlow is available")
+        # Use our dummy interpreter
+        Interpreter = DummyInterpreter
+        print("Using dummy interpreter for testing")
+        HAS_TFLITE = False
+
+app = Flask(__name__)
 CORS(app)  # Enable CORS for Flutter integration
 
-# Load the trained model
-MODEL_PATH = os.path.join('weights', 'best.pt')
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = None
-CLASS_NAMES = []
+# Constants
+MODEL_PATH = os.path.join('model.tflite')
+CLASS_PATH = os.path.join('classes.txt')
+CONFIDENCE_THRESHOLD = 0.75  # 75% threshold for predictions
 
-# Image preprocessing transformer
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
-# Confidence threshold for showing predictions (75%)
-CONFIDENCE_THRESHOLD = 0.75
-
-def create_model(num_classes):
-    """Create a MobileNetV3 model for classification"""
-    # Load a pre-trained MobileNetV3 Small model
-    model = models.mobilenet_v3_small(weights=None)
-    
-    # Replace the classifier with a new one for our number of classes
-    model.classifier[3] = nn.Linear(model.classifier[3].in_features, num_classes)
-    
-    return model
+# Global variables
+interpreter = None
+class_names = []
+input_details = None
+output_details = None
 
 def load_model():
-    global model, CLASS_NAMES
+    """Load the TFLite model and class names"""
+    global interpreter, class_names, input_details, output_details
+    
     try:
         print(f"Current working directory: {os.getcwd()}")
         print(f"Listing files in current directory: {os.listdir('.')}")
         
         # Load class names
-        class_path = 'classes.txt'
-        if os.path.exists(class_path):
-            print(f"Found classes file at {class_path}")
-            with open(class_path, 'r') as f:
-                CLASS_NAMES = [line.strip() for line in f.readlines()]
-            print(f"Loaded {len(CLASS_NAMES)} classes")
+        if os.path.exists(CLASS_PATH):
+            print(f"Found classes file at {CLASS_PATH}")
+            with open(CLASS_PATH, 'r') as f:
+                class_names = [line.strip() for line in f.readlines()]
+            print(f"Loaded {len(class_names)} classes")
         else:
-            print(f"Warning: Classes file not found at {class_path}")
+            print(f"Warning: Classes file not found at {CLASS_PATH}")
             # Fallback to default classes
-            CLASS_NAMES = [f"Class_{i}" for i in range(37)]
-            print(f"Using {len(CLASS_NAMES)} fallback classes")
+            class_names = [f"Class_{i}" for i in range(37)]
+            print(f"Using {len(class_names)} fallback classes")
         
-        # Check if weights directory exists
-        if os.path.exists('weights'):
-            print(f"Weights directory exists. Contents: {os.listdir('weights')}")
-        else:
-            print(f"Weights directory does not exist")
-        
-        # Load model
-        num_classes = len(CLASS_NAMES)
-        model = create_model(num_classes)
-        
-        if os.path.exists(MODEL_PATH):
+        # Load TFLite model
+        if os.path.exists(MODEL_PATH) and HAS_TFLITE:
             print(f"Loading model from {MODEL_PATH}")
-            model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-            model.to(DEVICE)
-            model.eval()
-            print(f"Model loaded successfully from {MODEL_PATH}")
+            interpreter = Interpreter(model_path=MODEL_PATH)
+            interpreter.allocate_tensors()
+            
+            # Get input and output tensors
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
+            
+            print(f"Model loaded successfully with:")
+            print(f"- Input shape: {input_details[0]['shape']}")
+            print(f"- Output shape: {output_details[0]['shape']}")
         else:
-            print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
-            # Initialize the model with random weights
-            model.eval()
-            print("Initialized model with random weights")
-        
-        return model
+            print(f"Warning: Model file not found at {MODEL_PATH} or TFLite not available. Using dummy model.")
+            interpreter = DummyInterpreter(model_path=MODEL_PATH)
+            interpreter.allocate_tensors()
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
+            
     except Exception as e:
         print(f"Error loading model: {str(e)}")
-        # Still return a model even if there's an error
-        if 'model' not in locals() or model is None:
-            num_classes = len(CLASS_NAMES) if CLASS_NAMES else 37
-            model = create_model(num_classes)
-            model.eval()
-            print("Created fallback model due to error")
-        return model
+        # Create a dummy interpreter for testing
+        interpreter = DummyInterpreter(model_path="dummy_model")
+        interpreter.allocate_tensors()
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+
+def preprocess_image(image):
+    """Preprocess image for model input"""
+    try:
+        # Get input shape
+        input_shape = input_details[0]['shape']
+        
+        # Model expects: [1, height, width, channels]
+        required_height, required_width = input_shape[1], input_shape[2]
+        
+        # Ensure image is in RGB format
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Resize image to match model input
+        image = image.resize((required_width, required_height))
+        
+        # Convert PIL Image to numpy array and normalize to 0-1
+        image_array = np.array(image).astype(np.float32) / 255.0
+        
+        # Add batch dimension
+        image_array = np.expand_dims(image_array, axis=0)
+        
+        return image_array
+    except Exception as e:
+        print(f"Error in preprocessing: {str(e)}")
+        # Return dummy input of correct shape
+        return np.zeros(input_details[0]['shape'], dtype=np.float32)
 
 def process_image(img):
-    """Process an image and return predictions only if confidence exceeds threshold"""
+    """Process an image and return predictions"""
     try:
         # Check if model is loaded
-        global model
-        if model is None:
+        global interpreter, class_names, input_details, output_details
+        if interpreter is None:
             print("Warning: Model not loaded, attempting to load it")
             load_model()
-            if model is None:
+            if interpreter is None:
                 return {
                     'success': False,
                     'error': 'Model not loaded',
@@ -105,59 +159,46 @@ def process_image(img):
                     'has_prediction': False
                 }
         
-        # Ensure the image is in RGB format
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+        # Preprocess the image
+        processed_image = preprocess_image(img)
         
-        # Apply transforms
-        img_tensor = transform(img)
+        # Set the tensor to point to the input data to be inferred
+        interpreter.set_tensor(input_details[0]['index'], processed_image)
         
-        # Add batch dimension
-        img_tensor = img_tensor.unsqueeze(0).to(DEVICE)
+        # Run the inference
+        interpreter.invoke()
         
-        # Make prediction
-        with torch.no_grad():
-            try:
-                outputs = model(img_tensor)
-                probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
-                
-                # Get top 3 predictions or fewer if there aren't enough classes
-                k = min(3, len(CLASS_NAMES))
-                top_probs, top_indices = torch.topk(probabilities, k)
-                
-                predictions = []
-                for i, (prob, idx) in enumerate(zip(top_probs, top_indices)):
-                    confidence = prob.item()
-                    class_id = idx.item()
-                    
-                    # Only include predictions with confidence above threshold
-                    if confidence >= CONFIDENCE_THRESHOLD or i == 0:  # Always include top prediction
-                        predictions.append({
-                            'class_id': class_id,
-                            'class_name': CLASS_NAMES[class_id] if class_id < len(CLASS_NAMES) else 'Unknown',
-                            'confidence': confidence
-                        })
-                
-                # Sort by confidence
-                predictions.sort(key=lambda x: x['confidence'], reverse=True)
-                
-                # Filter out predictions below threshold
-                filtered_predictions = [p for p in predictions if p['confidence'] >= CONFIDENCE_THRESHOLD]
-                
-                return {
-                    'success': True,
-                    'predictions': filtered_predictions,
-                    'has_prediction': len(filtered_predictions) > 0,
-                    'top_prediction': predictions[0] if predictions else None
-                }
-            except Exception as e:
-                print(f"Error during model prediction: {str(e)}")
-                return {
-                    'success': False,
-                    'error': f"Model prediction error: {str(e)}",
-                    'predictions': [],
-                    'has_prediction': False
-                }
+        # Get the output
+        output = interpreter.get_tensor(output_details[0]['index'])
+        
+        # Convert outputs to probabilities with softmax
+        probabilities = np.exp(output) / np.sum(np.exp(output), axis=1, keepdims=True)
+        
+        # Get top predictions
+        # Ensure we don't try to get more classes than we have
+        k = min(3, len(class_names))
+        indices = np.argsort(probabilities[0])[-k:][::-1]  # Top k indices in descending order
+        probs = probabilities[0][indices]  # Corresponding probabilities
+        
+        predictions = []
+        for i, (idx, prob) in enumerate(zip(indices, probs)):
+            # Only include predictions with confidence above threshold or the top one
+            if prob >= CONFIDENCE_THRESHOLD or i == 0:  # Always include top prediction
+                predictions.append({
+                    'class_id': int(idx),
+                    'class_name': class_names[idx] if idx < len(class_names) else f"Class_{idx}",
+                    'confidence': float(prob)
+                })
+        
+        # Filter out predictions below threshold
+        filtered_predictions = [p for p in predictions if p['confidence'] >= CONFIDENCE_THRESHOLD]
+        
+        return {
+            'success': True,
+            'predictions': filtered_predictions,
+            'has_prediction': len(filtered_predictions) > 0,
+            'top_prediction': predictions[0] if predictions else None
+        }
     except Exception as e:
         print(f"Error in process_image: {str(e)}")
         return {
@@ -236,24 +277,58 @@ def predict_webcam():
                 'has_prediction': False
             })
 
-# Simple route for Flutter health check
+# Simple route for Flutter health check and documentation
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'ok',
-        'model_loaded': model is not None,
-        'classes': len(CLASS_NAMES)
+        'model_loaded': interpreter is not None,
+        'classes': len(class_names),
+        'api_endpoints': [
+            {
+                'path': '/api/predict',
+                'method': 'POST',
+                'description': 'Upload an image file for road sign detection',
+                'parameter': 'image (form-data file)'  
+            },
+            {
+                'path': '/api/predict_webcam',
+                'method': 'POST',
+                'description': 'Send base64-encoded image for road sign detection',
+                'parameter': 'image (JSON string)'  
+            },
+            {
+                'path': '/api/health',
+                'method': 'GET',
+                'description': 'Check API status and available endpoints'  
+            }
+        ]
+    })
+
+# Root route that documents the API
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        'name': 'Road Sign Detection API',
+        'description': 'API for detecting road signs in images',
+        'version': '1.0.0',
+        'endpoints': [
+            '/api/predict - POST: Detect road signs in uploaded image',
+            '/api/predict_webcam - POST: Detect road signs in base64 image',
+            '/api/health - GET: Check API status'
+        ],
+        'status': 'online'
     })
 
 # Initialize model at startup (but not during module import)
-model = None
-CLASS_NAMES = []
+interpreter = None
+class_names = []
 
 # This will ensure the model is loaded when the app starts, not just in __main__
 @app.before_first_request
 def initialize():
-    global model
-    if model is None:
+    global interpreter
+    if interpreter is None:
         print("Loading model before first request")
         load_model()
 

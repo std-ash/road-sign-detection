@@ -1,1 +1,1 @@
-web: gunicorn app_tflite:app
+web: gunicorn app:app
