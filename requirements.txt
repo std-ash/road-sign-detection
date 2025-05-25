@@ -1,15 +1,21 @@
-# Core dependencies - minimal set for Heroku
-numpy==1.22.4
-pillow==9.1.1
+# Core dependencies
+numpy>=1.18.5
+opencv-python>=4.1.2
+torch>=1.7.0
+torchvision>=0.8.1
+pillow>=7.1.2
+pandas>=1.1.4
 
-# Web server with fixed versions to avoid compatibility issues
-flask==2.0.1
-werkzeug==2.0.2
-flask-cors==3.0.10
-gunicorn==20.1.0
-jinja2==3.0.3
-itsdangerous==2.0.1
-click==8.0.3
+# YOLOv5 dependencies
+seaborn>=0.11.0
+matplotlib>=3.2.2
+scipy>=1.4.1
+tqdm>=4.41.0
 
-# Utilities - only what's needed
-requests==2.27.1
+# Web server
+flask>=2.0.1
+flask-cors>=3.0.10
+gunicorn>=20.1.0
+
+# Utilities
+requests>=2.23.0

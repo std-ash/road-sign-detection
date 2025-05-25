@@ -25,17 +25,26 @@ venv/
 ENV/
 .env
 
-# IDE files
+# PyTorch 
+*.pt
+*.pth
+!weights/best.pt
+
+# IDE specific files
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# OS specific
-.DS_Store
-Thumbs.db
+# Logs
+*.log
 
-# Large files - exclude model weights by default
-# Comment this out before pushing if you want to include them
-# weights/*.pt
-# Or track with Git LFS
+# Local development settings
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Heroku
+.heroku/
+*.sqlite3

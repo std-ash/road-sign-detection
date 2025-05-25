@@ -1,116 +1,87 @@
 # Road Sign Detection API
 
-A machine learning API for detecting and classifying road signs in images, designed for mobile integration.
+A real-time road sign detection system with two-stage detection: YOLOv5 for locating signs and MobileNetV3 for classification.
 
 ## Features
 
 - Two-stage detection approach:
-  1. First detects road signs in images using YOLOv5
-  2. Then classifies the detected signs using MobileNetV3
-- Real-time detection via webcam
-- REST API for mobile applications
-- Flutter-ready with CORS support
+  - YOLOv5 for detecting road signs from a distance
+  - MobileNetV3 for accurately classifying the detected signs
+- Real-time webcam detection via browser
+- REST API for mobile integration (Flutter)
 - 75% confidence threshold for reliable predictions
 
-## Project Structure
+## Live Demo
 
-```
-deployment/
-├── app.py              # Main Flask application
-├── model_loader.py     # Script to download model weights
-├── classes.txt         # Road sign class names
-├── requirements.txt    # Python dependencies
-├── Procfile            # For Heroku deployment
-├── runtime.txt         # Python version for Heroku
-├── templates/          # Web interface templates
-│   ├── index.html      # Image upload interface
-│   └── realtime.html   # Real-time webcam detection
-└── weights/            # Model weights directory
-    └── best.pt         # Classification model (not in repo)
-```
-
-## Setup for Local Development
-
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Place your model weights in the `weights/` directory:
-   - `weights/best.pt` - Your trained classification model
-   - `weights/yolov5_traffic_signs.pt` - Optional specialized YOLOv5 model
-
-3. Run the application:
-   ```bash
-   python app.py
-   ```
-
-4. Access the web interface at http://localhost:5000/
+[Access the demo here](#) (Update this link after Heroku deployment)
 
 ## API Endpoints
 
-- `GET /api/health` - Health check endpoint
-- `POST /api/predict` - Submit an image for road sign detection
-- `POST /api/predict_webcam` - Submit a base64-encoded image from webcam
-- `GET /realtime` - Real-time webcam detection web interface
+### Health Check
+```
+GET /api/health
+```
 
-## Deployment to Heroku
+### Image Upload Detection
+```
+POST /api/predict
+```
 
-### Prerequisites
+### Real-time Webcam Detection
+```
+POST /api/predict_webcam
+```
 
-1. [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
-2. [Git](https://git-scm.com/)
-3. Heroku account
+## Local Development
 
-### Steps
+1. Clone this repository
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+3. Run the application:
+```bash
+python app.py
+```
 
-1. Initialize Git repository (if not already done):
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   ```
+## Deployment
 
-2. Create a Heroku app:
-   ```bash
-   heroku create your-app-name
-   ```
+This application is ready for deployment on Heroku:
 
-3. Set up environment variables for your model URLs:
-   ```bash
-   heroku config:set MODEL_WEIGHTS_URL=https://your-storage-url/best.pt
-   heroku config:set YOLO_WEIGHTS_URL=https://your-storage-url/yolov5_traffic_signs.pt
-   ```
-
-4. Deploy to Heroku:
-   ```bash
-   git push heroku main
-   ```
-
-5. Scale the web dyno:
-   ```bash
-   heroku ps:scale web=1
-   ```
-
-6. Open your app:
-   ```bash
-   heroku open
-   ```
-
-## Important Notes for Heroku Deployment
-
-1. **Model Weights**: Due to GitHub and Heroku file size limitations, model weights are not included in the repository. The application will download them at startup using URLs specified in environment variables.
-
-2. **Memory Usage**: YOLOv5 and PyTorch require significant memory. You might need to use a paid Heroku dyno for reliable performance.
-
-3. **Slug Size**: Heroku has a 500MB slug size limit. We've optimized the dependencies, but you might need to further reduce them if you hit this limit.
-
-4. **Timeout**: Heroku has a 30-second request timeout. The detection process should complete within this time, but for large images, it might time out.
+1. Create a new Heroku app
+2. Connect your GitHub repository
+3. Enable the Heroku Buildpacks:
+   - `heroku/python`
+   - `https://github.com/heroku/heroku-buildpack-apt`
+4. Deploy the application
 
 ## Flutter Integration
 
-See the API documentation for details on integrating with Flutter applications. The API is designed to work seamlessly with mobile applications.
+Check the API response format for integration with mobile applications:
+
+```json
+{
+  "success": true,
+  "predictions": [
+    {
+      "class_id": 5,
+      "class_name": "Stop Sign",
+      "confidence": 0.97,
+      "bbox": [100, 200, 300, 400]
+    }
+  ],
+  "has_prediction": true,
+  "top_prediction": {
+    "class_id": 5,
+    "class_name": "Stop Sign",
+    "confidence": 0.97,
+    "bbox": [100, 200, 300, 400]
+  },
+  "detection_mode": "two-stage",
+  "num_detections": 1
+}
+```
 
 ## License
 
-[MIT](LICENSE)
+MIT

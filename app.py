@@ -11,8 +11,6 @@ from PIL import Image
 from torchvision import transforms, models
 import requests
 import time
-import sys
-from model_loader import prepare_models
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 CORS(app)  # Enable CORS for Flutter integration
@@ -36,13 +34,7 @@ CLASSIFICATION_THRESHOLD = 0.75  # 75% for classification confidence
 DETECTION_THRESHOLD = 0.4  # 40% for detection confidence
 
 # YOLOv5 detection classes that could be road signs
-ROAD_SIGN_CLASSES = [
-    'traffic light', 'stop sign', 'parking meter', 'fire hydrant',
-    'car', 'truck', 'bus', 'person', 'bicycle', 'motorcycle',
-    'traffic sign', 'street sign', 'pole', 'signboard'
-]
-# Path to custom YOLOv5 weights if available
-CUSTOM_YOLO_PATH = os.path.join('weights', 'yolov5_traffic_signs.pt')
+ROAD_SIGN_CLASSES = ['traffic light', 'stop sign', 'parking meter', 'fire hydrant']
 
 def create_model(num_classes):
     """Create a MobileNetV3 model for classification"""
@@ -55,291 +47,85 @@ def create_model(num_classes):
     return model
 
 def load_yolo():
-    """Load YOLOv5 model for object detection, prioritizing traffic sign detection"""
+    """Load YOLOv5 model for object detection"""
+    global yolo_model
     try:
-        import os
-        import sys
-        import torch
-        
-        # Force PyTorch to use CPU only to save memory
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''
-        
-        if os.path.exists(CUSTOM_YOLO_PATH):
-            # Try to load specialized traffic sign detection model first
-            print("Loading specialized YOLOv5 traffic sign detection model...")
-            # Use local import of YOLOv5 with minimum dependencies
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'custom', 
-                                       path=CUSTOM_YOLO_PATH, 
-                                       force_reload=False,
-                                       skip_validation=True)  # Skip validation to save memory
-        else:
-            # Fall back to pretrained YOLOv5 small model (not medium) to save memory
-            print("Loading lightweight YOLOv5s model...")
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', 
-                                       force_reload=False,
-                                       skip_validation=True)  # Skip validation to save memory
-            
-        # Configure YOLOv5 for small object detection while minimizing memory usage
-        yolo_model.conf = DETECTION_THRESHOLD  # Detection confidence threshold
-        yolo_model.iou = 0.45  # NMS IoU threshold
-        yolo_model.agnostic = False  # NMS class-agnostic
-        yolo_model.multi_label = False  # NMS multiple labels per box
-        yolo_model.max_det = 10  # Maximum number of detections per image
-        
-        # Clear cache to save memory
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            
+        # Load YOLOv5 from torch hub
+        yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+        yolo_model.to(DEVICE)
+        yolo_model.eval()
+        print("YOLOv5 model loaded successfully")
         return yolo_model
     except Exception as e:
         print(f"Error loading YOLOv5 model: {e}")
-        # Try to load the smallest YOLOv5 model as a last resort
-        try:
-            print("Falling back to YOLOv5s...")
-            yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', 
-                                        pretrained=True, 
-                                        force_reload=False, 
-                                        skip_validation=True)
-            yolo_model.conf = 0.25  # Lower confidence threshold
-            print("YOLOv5s model loaded successfully as fallback")
-            return yolo_model
-        except Exception as e2:
-            print(f"Error loading fallback YOLOv5 model: {e2}")
-            print("No YOLOv5 model available for detection")
-            return None
+        # Fallback to using YOLOv5 API if torch hub fails
+        print("Using YOLOv5 API fallback for detection")
+        return None
 
 def load_model():
     global model, yolo_model, CLASS_NAMES
+    # Load class names
+    with open('classes.txt', 'r') as f:
+        CLASS_NAMES = [line.strip() for line in f.readlines()]
     
-    # Load class names with error handling
-    try:
-        if os.path.exists('classes.txt'):
-            with open('classes.txt', 'r') as f:
-                CLASS_NAMES = [line.strip() for line in f.readlines()]
-            print(f"Loaded {len(CLASS_NAMES)} classes from classes.txt")
-        else:
-            # Default classes if file not found
-            print("Warning: classes.txt not found. Using default classes.")
-            CLASS_NAMES = [
-                'Bus-stop', 'Compulsory-Roundabout', 'Cross-Roads-Ahead',
-                'Double-Bend-to-Left-Ahead', 'Double-Bend-to-Right-Ahead',
-                'Falling-Rocks-Ahead', 'Left-Bend-Ahead', 'Level-crossing-with-barriers-ahead',
-                'Level-crossing-without-barriers-ahead', 'Narrow-Bridge-or-Culvert-Ahead',
-                'No-entry', 'No-overtaking', 'No-parking', 'Pedestrian-crossing-ahead',
-                'Right-Bend-Ahead', 'Road-narrows-on-both-sides-ahead', 'School-ahead',
-                'Slippery-Road-Ahead', 'Speed-limit-20', 'Speed-limit-30', 'Speed-limit-50',
-                'Stop', 'T-Junction-Ahead', 'Traffic-signals-ahead'
-            ]
-    except Exception as e:
-        print(f"Error loading classes: {e}")
-        CLASS_NAMES = ['Unknown']
+    # Load classification model
+    num_classes = len(CLASS_NAMES)
+    model = create_model(num_classes)
     
-    # Create classification model
-    try:
-        num_classes = len(CLASS_NAMES)
-        model = create_model(num_classes)
-        
-        if os.path.exists(MODEL_PATH):
-            try:
-                model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-                model.to(DEVICE)
-                model.eval()
-                print(f"Classification model loaded from {MODEL_PATH}")
-            except Exception as e:
-                print(f"Error loading model weights: {e}")
-                print("Using untrained model as fallback")
-        else:
-            print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
-    except Exception as e:
-        print(f"Error creating classification model: {e}")
-        model = None
+    if os.path.exists(MODEL_PATH):
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+        model.to(DEVICE)
+        model.eval()
+        print(f"Classification model loaded from {MODEL_PATH}")
+    else:
+        print(f"Warning: Model not found at {MODEL_PATH}. Using untrained model.")
     
     # Load YOLOv5 detection model
-    try:
-        yolo_model = load_yolo()
-        if yolo_model is None:
-            print("Warning: YOLOv5 model could not be loaded. Detection will be limited.")
-    except Exception as e:
-        print(f"Error loading YOLOv5 model: {e}")
-        yolo_model = None
+    yolo_model = load_yolo()
     
     return model
-
-def enhance_image_for_detection(img):
-    """Enhance the image to make road signs more visible"""
-    try:
-        # Convert PIL Image to OpenCV format
-        img_cv = np.array(img)
-        img_cv = img_cv[:, :, ::-1].copy()  # RGB to BGR for OpenCV
-        
-        # Create a copy of the original image for enhancement
-        enhanced = img_cv.copy()
-        
-        # Apply contrast enhancement
-        lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        cl = clahe.apply(l)
-        enhanced_lab = cv2.merge((cl, a, b))
-        enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-        
-        # Apply slight sharpening
-        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-        enhanced = cv2.filter2D(enhanced, -1, kernel)
-        
-        # Convert back to PIL Image
-        enhanced_pil = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
-        return enhanced_pil
-    except Exception as e:
-        print(f"Error enhancing image: {e}")
-        return img  # Return original if enhancement fails
 
 def detect_road_signs(img):
     """Detect potential road signs in the image using YOLOv5"""
     try:
         if yolo_model is not None:
-            # Create multiple versions of the image for better detection
-            images = [
-                img,  # Original image
-                enhance_image_for_detection(img)  # Enhanced image
-            ]
+            # Use the loaded YOLOv5 model
+            results = yolo_model(img)
+            detections = results.pandas().xyxy[0]  # Get detection results as DataFrame
             
-            all_detections = []
-            
-            # Run detection on each image version
-            for img_version in images:
-                # Use the loaded YOLOv5 model
-                results = yolo_model(img_version)
-                detections = results.pandas().xyxy[0]  # Get detection results as DataFrame
-                
-                # Filter detections for potential road signs
-                for _, detection in detections.iterrows():
-                    if detection['confidence'] >= DETECTION_THRESHOLD:
-                        # Check if it's a known road sign class or has high confidence
-                        if detection['name'] in ROAD_SIGN_CLASSES or detection['confidence'] > 0.6:
-                            # Expand the bounding box slightly to ensure the whole sign is captured
-                            xmin = max(0, detection['xmin'] - 5)
-                            ymin = max(0, detection['ymin'] - 5)
-                            xmax = min(img.width, detection['xmax'] + 5)
-                            ymax = min(img.height, detection['ymax'] + 5)
-                            
-                            all_detections.append({
-                                'bbox': [xmin, ymin, xmax, ymax],
-                                'confidence': detection['confidence'],
-                                'class': detection['name']
-                            })
-            
-            # Merge overlapping detections (non-maximum suppression)
-            final_detections = []
-            all_detections.sort(key=lambda x: x['confidence'], reverse=True)
-            
-            for detection in all_detections:
-                should_add = True
-                for final_det in final_detections:
-                    # Calculate IoU (Intersection over Union)
-                    bbox1 = detection['bbox']
-                    bbox2 = final_det['bbox']
-                    
-                    # Calculate intersection area
-                    x_left = max(bbox1[0], bbox2[0])
-                    y_top = max(bbox1[1], bbox2[1])
-                    x_right = min(bbox1[2], bbox2[2])
-                    y_bottom = min(bbox1[3], bbox2[3])
-                    
-                    if x_right < x_left or y_bottom < y_top:
-                        intersection_area = 0
-                    else:
-                        intersection_area = (x_right - x_left) * (y_bottom - y_top)
-                    
-                    # Calculate union area
-                    bbox1_area = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
-                    bbox2_area = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
-                    union_area = bbox1_area + bbox2_area - intersection_area
-                    
-                    iou = intersection_area / union_area if union_area > 0 else 0
-                    
-                    if iou > 0.5:  # If there's significant overlap
-                        should_add = False
-                        break
-                
-                if should_add:
-                    final_detections.append(detection)
-            
-            # If no road signs detected, try a more aggressive approach with lower threshold
-            if not final_detections:
-                # Use a lower confidence threshold for a second pass
-                results = yolo_model(enhance_image_for_detection(img))
-                detections = results.pandas().xyxy[0]
-                
-                for _, detection in detections.iterrows():
-                    if detection['confidence'] >= 0.2:  # Lower threshold
-                        # Expand the bounding box more aggressively
-                        xmin = max(0, detection['xmin'] - 10)
-                        ymin = max(0, detection['ymin'] - 10)
-                        xmax = min(img.width, detection['xmax'] + 10)
-                        ymax = min(img.height, detection['ymax'] + 10)
-                        
-                        final_detections.append({
-                            'bbox': [xmin, ymin, xmax, ymax],
+            # Filter detections for potential road signs
+            road_sign_detections = []
+            for _, detection in detections.iterrows():
+                if detection['confidence'] >= DETECTION_THRESHOLD:
+                    # Check if it's a known road sign class or has high confidence
+                    if detection['name'] in ROAD_SIGN_CLASSES or detection['confidence'] > 0.7:
+                        road_sign_detections.append({
+                            'bbox': [detection['xmin'], detection['ymin'], detection['xmax'], detection['ymax']],
                             'confidence': detection['confidence'],
                             'class': detection['name']
                         })
             
-            return final_detections
+            return road_sign_detections
         else:
-            # Fallback to using a simple color-based detection approach
-            # This is a very basic approach that looks for common road sign colors
-            img_cv = np.array(img)
-            img_cv = img_cv[:, :, ::-1].copy()  # RGB to BGR
+            # Fallback to using YOLOv5 API if model couldn't be loaded
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='JPEG')
+            img_bytes = img_bytes.getvalue()
             
-            # Convert to HSV for better color detection
-            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+            # Use YOLOv5 API
+            url = 'https://detect.roboflow.com/traffic-sign-detection-tsocd/1'
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            }
+            params = {
+                'api_key': 'YOUR_API_KEY',  # Replace with your API key if using this method
+                'confidence': DETECTION_THRESHOLD,
+                'overlap': 0.5,
+            }
             
-            # Define color ranges for common road sign colors (red, blue, yellow)
-            # Red range (wraps around in HSV)  
-            lower_red1 = np.array([0, 100, 100])
-            upper_red1 = np.array([10, 255, 255])
-            lower_red2 = np.array([160, 100, 100])
-            upper_red2 = np.array([180, 255, 255])
-            
-            # Blue range
-            lower_blue = np.array([100, 100, 100])
-            upper_blue = np.array([140, 255, 255])
-            
-            # Yellow range
-            lower_yellow = np.array([20, 100, 100])
-            upper_yellow = np.array([30, 255, 255])
-            
-            # Create masks
-            mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-            mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-            mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-            mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-            mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-            
-            # Combine masks
-            combined_mask = cv2.bitwise_or(mask_red, mask_blue)
-            combined_mask = cv2.bitwise_or(combined_mask, mask_yellow)
-            
-            # Find contours
-            contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            # Filter contours by size and shape
-            potential_signs = []
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if area > 500:  # Minimum area threshold
-                    x, y, w, h = cv2.boundingRect(contour)
-                    aspect_ratio = float(w) / h
-                    # Most road signs have aspect ratios close to 1
-                    if 0.5 <= aspect_ratio <= 2.0:
-                        potential_signs.append({
-                            'bbox': [float(x), float(y), float(x + w), float(y + h)],
-                            'confidence': 0.3,  # Default confidence for color-based detection
-                            'class': 'potential_sign'
-                        })
-            
-            return potential_signs
+            # This is a fallback and would require an API key to actually work
+            # For now, we'll return an empty list to avoid errors
+            return []
             
     except Exception as e:
         print(f"Error in detection: {e}")
@@ -520,7 +306,7 @@ def predict():
             })
 
 @app.route('/api/predict_webcam', methods=['POST'])
-@app.route('/predict_webcam', methods=['POST']) 
+@app.route('/predict_webcam', methods=['POST'])  # Keep old route for backward compatibility
 def predict_webcam():
     if request.method == 'POST':
         try:
@@ -551,43 +337,17 @@ def predict_webcam():
                 'has_prediction': False
             })
 
-# Health check endpoints
+# Simple route for Flutter health check
 @app.route('/api/health', methods=['GET'])
-@app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'ok',
         'model_loaded': model is not None,
-        'classes': len(CLASS_NAMES) if CLASS_NAMES else 0
+        'classes': len(CLASS_NAMES)
     })
 
-# Add a simple index route if none of the template routes match
-@app.route('/', methods=['GET'])
-def index_redirect():
-    try:
-        return render_template('index.html')
-    except Exception as e:
-        return jsonify({
-            'status': 'ok',
-            'info': 'Road Sign Detection API is running. Use /api/predict or /realtime endpoints.',
-            'error': str(e)
-        })
-
-# Initialize the application
-# We'll load models on-demand instead of at startup
-print("Initializing application in lightweight mode...")
-
-# Set global variables to None initially
-model = None
-yolo_model = None
-CLASS_NAMES = []
-
-# Flag to track if models have been loaded
-MODELS_LOADED = False
-
 if __name__ == '__main__':
+    load_model()
     # Get port from environment variable (Heroku sets this automatically)
     port = int(os.environ.get('PORT', 5000))
-    
-    # Start the Flask app
     app.run(debug=False, host='0.0.0.0', port=port)
